@@ -41,16 +41,15 @@ process write_out_mothur_batch_fies{
 // Python script that makes a distinct sequence fasta
 process make_distinct_query_fasta_run_mmseqs{
     cache 'lenient'
-    tag "run_taxonomy"
+    tag "make_tax_query_db"
     conda "envs/nf_18S.yml"
-    // storeDir "${params.base_dir}/taxonomy_QC/mmseqs_input_fasta"
     
     input:
     file(pairs) from ch_tax_screen_in.collect()
 
     output:
     file "*.filtered.{fasta,names}" into ch_filtered_files
-    //"mmseq.out" into ch_mmseq_out
+    file "tax_query.fasta" into ch_mmseq_out
 
     script:
     """
@@ -58,21 +57,72 @@ process make_distinct_query_fasta_run_mmseqs{
     """
 }
 
-// for the time being, let's try to get output channel into shape
+// Make the query db from the fasta that was ouput from prev process
+process make_mmseqs_querydb{
+    cache 'lenient'
+    tag 'make_mmseqs_querydb'
+    conda "envs/nf_18S.yml"
 
-// At this point we'll want to work with the filtered files
-// It would be good if we could go back to paired files from the collect
-ch_filtered_files.toSortedList().flatten().groupBy { String str -> str[0..3] }.println()
-// fasta is input to process that runs against an mmseqs database
-// output is passed into python script that splits the .fasta and .names files into coral symbiodiniaceae and other
-// process mmseq_fasta_against_nt{
+    input:
+    file in_fasta from ch_mmseqs_out
 
-// }
+    output:
+    file 'queryDB' into ch_do_tax_query
 
-// mmseqs createdb tax_query.fasta queryDB
-// mmseqs taxonomy queryDB ${params.path_to_seqtaxdb} taxonomyResult tmp
-// mmseqs createtsv queryDB taxonomyResult taxonomyResult.tsv
-// mmseqs taxonomyreport seqTaxDB taxonomyResult report.html --report-mode 1
+    script:
+    """
+    mmseqs createdb $in_fasta queryDB
+    """
+}
+
+// Use the queryDB made in prev process to do an actual taxonomy query
+// NB it was a lot of effort to make the mmseqs taxonomy database
+// We started from from the nt database that had already been downloaded using
+// the ususal update_blastdb.pl
+// We then followed the docs here:
+// https://github.com/soedinglab/MMseqs2/wiki#create-a-seqtaxdb-from-an-existing-blast-database
+// We then made an index of the resulting nt.fnaDB
+// This index was absolutely massive though - about 4T so it may be worth not doing the index in future
+// In general the massive file sizes could be a down side to using mmseqs in general and it could be that
+// blast will be a more realistic way forwards. But for the time being will try to work with
+// mmseqs as we've put the effort in so far.
+process do_mmseqs_tax_query{
+    cache 'lenient'
+    tag 'make_mmseqs_querydb'
+    conda "envs/nf_18S.yml"
+
+    input:
+    file queryDB from ch_do_tax_query
+
+    output:
+    file 'taxonomyResult', file 'report.html' into ch_tax_results
+
+    script:
+    """
+    mmseqs taxonomy $queryDB ${params.path_to_seqtaxdb} taxonomyResult tmp --tax-lineage 1
+    mmseqs taxonomyreport ${params.path_to_seqtaxdb} taxonomyResult report.html --report-mode 1
+    """
+}
+
+// Once we have the taxonomyResult file we can then go on a pair by pair basis and split the .fasta and .name files
+// into scleractinia, symbiodiniaceae and other 
+process split_seqs_by_taxa{
+    cache 'lenient'
+    tag "${fasta_file}"
+    conda "envs/nf_18S.yml"
+
+    input:
+    tuple file(fasta_file), file(names_file) from ch_filtered_files.toSortedList().flatten().groupBy { file_obj -> file_obj.getName()[0..3] }.map{it[1]}
+
+    output:
+    tuple file('*.coral.fasta'), file('*.coral.names'), file('*.zooxs.fasta'), file('*.zooxs.names'), file('*.other.fasta'), file('*.other.names')
+
+    script:
+    """
+    python3 ${params.base_dir}/bin/split_seqs_by_taxa.py
+    """
+}
+
 
 
 
