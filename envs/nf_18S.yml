@@ -1,0 +1,12 @@
+name: nf_18S_intra_env 
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3
+  - mothur==1.43.0
+  - mmseqs2
+  - pip
+  - pip:
+    - numpy
+    - pandas

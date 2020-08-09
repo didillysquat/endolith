@@ -1,0 +1,6 @@
+input_data
+.nextflow*
+.vscode
+work
+mothur_qc
+mmseqs_testing
