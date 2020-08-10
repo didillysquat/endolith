@@ -4,3 +4,6 @@ input_data
 work
 mothur_qc
 mmseqs_testing
+tax_results
+splits_seq_testing
+post_qc_seqs

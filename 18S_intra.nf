@@ -89,10 +89,12 @@ process make_mmseqs_querydb{
     """
 }
 
+// ch_filtered_files.toSortedList().flatten().groupBy { file_obj -> file_obj.getName()[0..3] }.flatMap{it.values().toList()}.combine(ch_tax_results)
+
 // ch_filtered_files.toSortedList().flatten().groupBy { file_obj -> file_obj.getName()[0..3] }.map{it[1]}.println()
-// // .combine(ch_tax_results).println()
-// // // Once we have the taxonomyResult file we can then go on a pair by pair basis and split the .fasta and .name files
-// // // into scleractinia, symbiodiniaceae and other 
+// .combine(ch_tax_results).println()
+// // Once we have the taxonomyResult file we can then go on a pair by pair basis and split the .fasta and .name files
+// // into scleractinia, symbiodiniaceae and other 
 process split_seqs_by_taxa{
     cache 'lenient'
     tag "${fasta_file}"
@@ -100,7 +102,7 @@ process split_seqs_by_taxa{
     publishDir "${params.base_dir}/post_qc_seqs"
 
     input:
-    tuple file(fasta_file), file(names_file), file(tax_files) from ch_filtered_files.toSortedList().flatten().groupBy { file_obj -> file_obj.getName()[0..3] }.map{it[1]}.combine(ch_tax_results)
+    tuple file(names_file), file(fasta_file), file(tax_tsv), file(query_fasta) from ch_filtered_files.toSortedList().flatten().groupBy { file_obj -> file_obj.getName()[0..3] }.flatMap{it.values().toList()}.combine(ch_tax_results)
 
     output:
     tuple file('*.c.fasta'), file('*.c.names'), file('*.s.fasta'), file('*.s.names'), file('*.o.fasta'), file('*.o.names')
