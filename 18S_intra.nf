@@ -58,23 +58,6 @@ process make_distinct_query_fasta_run_mmseqs{
 }
 
 // Make the query db from the fasta that was ouput from prev process
-process make_mmseqs_querydb{
-    cache 'lenient'
-    tag 'make_mmseqs_querydb'
-    conda "envs/nf_18S.yml"
-
-    input:
-    file in_fasta from ch_mmseqs_out
-
-    output:
-    file 'queryDB' into ch_do_tax_query
-
-    script:
-    """
-    mmseqs createdb $in_fasta queryDB
-    """
-}
-
 // Use the queryDB made in prev process to do an actual taxonomy query
 // NB it was a lot of effort to make the mmseqs taxonomy database
 // We started from from the nt database that had already been downloaded using
@@ -86,23 +69,26 @@ process make_mmseqs_querydb{
 // In general the massive file sizes could be a down side to using mmseqs in general and it could be that
 // blast will be a more realistic way forwards. But for the time being will try to work with
 // mmseqs as we've put the effort in so far.
-process do_mmseqs_tax_query{
+process make_mmseqs_querydb{
     cache 'lenient'
     tag 'make_mmseqs_querydb'
     conda "envs/nf_18S.yml"
+    publishDir "${params.base_dir}/tax_results"
 
     input:
-    file queryDB from ch_do_tax_query
+    file in_fasta from ch_mmseq_out
 
     output:
-    file 'taxonomyResult', file 'report.html' into ch_tax_results
+    tuple file('taxonomyResult.tsv'), file('tax_query.fasta') into ch_tax_results
 
     script:
     """
-    mmseqs taxonomy $queryDB ${params.path_to_seqtaxdb} taxonomyResult tmp --tax-lineage 1
-    mmseqs taxonomyreport ${params.path_to_seqtaxdb} taxonomyResult report.html --report-mode 1
+    mmseqs createdb $in_fasta queryDB
+    mmseqs taxonomy queryDB ${params.path_to_seqtaxdb} taxonomyResult tmp --tax-lineage 1
+    mmseqs createtsv queryDB taxonomyResult taxonomyResult.tsv
     """
 }
+
 
 // Once we have the taxonomyResult file we can then go on a pair by pair basis and split the .fasta and .name files
 // into scleractinia, symbiodiniaceae and other 
@@ -122,8 +108,4 @@ process split_seqs_by_taxa{
     python3 ${params.base_dir}/bin/split_seqs_by_taxa.py
     """
 }
-
-
-
-
 
