@@ -89,19 +89,21 @@ process make_mmseqs_querydb{
     """
 }
 
-
-// Once we have the taxonomyResult file we can then go on a pair by pair basis and split the .fasta and .name files
-// into scleractinia, symbiodiniaceae and other 
+// ch_filtered_files.toSortedList().flatten().groupBy { file_obj -> file_obj.getName()[0..3] }.map{it[1]}.println()
+// // .combine(ch_tax_results).println()
+// // // Once we have the taxonomyResult file we can then go on a pair by pair basis and split the .fasta and .name files
+// // // into scleractinia, symbiodiniaceae and other 
 process split_seqs_by_taxa{
     cache 'lenient'
     tag "${fasta_file}"
     conda "envs/nf_18S.yml"
+    publishDir "${params.base_dir}/post_qc_seqs"
 
     input:
-    tuple file(fasta_file), file(names_file) from ch_filtered_files.toSortedList().flatten().groupBy { file_obj -> file_obj.getName()[0..3] }.map{it[1]}
+    tuple file(fasta_file), file(names_file), file(tax_files) from ch_filtered_files.toSortedList().flatten().groupBy { file_obj -> file_obj.getName()[0..3] }.map{it[1]}.combine(ch_tax_results)
 
     output:
-    tuple file('*.coral.fasta'), file('*.coral.names'), file('*.zooxs.fasta'), file('*.zooxs.names'), file('*.other.fasta'), file('*.other.names')
+    tuple file('*.c.fasta'), file('*.c.names'), file('*.s.fasta'), file('*.s.names'), file('*.o.fasta'), file('*.o.names')
 
     script:
     """
