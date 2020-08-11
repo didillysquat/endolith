@@ -89,12 +89,16 @@ process make_mmseqs_querydb{
     """
 }
 
-// ch_filtered_files.toSortedList().flatten().groupBy { file_obj -> file_obj.getName()[0..3] }.flatMap{it.values().toList()}.combine(ch_tax_results)
 
-// ch_filtered_files.toSortedList().flatten().groupBy { file_obj -> file_obj.getName()[0..3] }.map{it[1]}.println()
-// .combine(ch_tax_results).println()
-// // Once we have the taxonomyResult file we can then go on a pair by pair basis and split the .fasta and .name files
-// // into scleractinia, symbiodiniaceae and other 
+// Once we have the taxonomyResult file we can then go on a pair by pair basis and split the .fasta and .name files
+// into scleractinia, symbiodiniaceae and other 
+// The channel manipulation was relatively complex. Becuase we had done a collect() for the make_distinct_query_fasta_run_mmseqs
+// process, we had to work out how to pairs this back up i.e. one tuple containing the .fasta and .names pair.
+// To do the pairing we used .groupBy, and used the first 4 characters as the key. Importantly,
+// this produced a single list hash map object that we then extracted the keys from, converted to list and then importantly
+// called with flatMap, so that the single list was returned as individual tuples.
+// Finally, we wanted to have a copy of the taxonomyResults.tsv and the tax_query.fasta for each of the fasta/names pairs.
+// To do this we were able to use combine. This worked well.
 process split_seqs_by_taxa{
     cache 'lenient'
     tag "${fasta_file}"
@@ -105,7 +109,7 @@ process split_seqs_by_taxa{
     tuple file(names_file), file(fasta_file), file(tax_tsv), file(query_fasta) from ch_filtered_files.toSortedList().flatten().groupBy { file_obj -> file_obj.getName()[0..3] }.flatMap{it.values().toList()}.combine(ch_tax_results)
 
     output:
-    tuple file('*.c.fasta'), file('*.c.names'), file('*.s.fasta'), file('*.s.names'), file('*.o.fasta'), file('*.o.names')
+    tuple file('*.c.fasta'), file('*.c.names'), file('*.s.fasta'), file('*.s.names'), file('*.o.fasta'), file('*.o.names') into ch_plotting
 
     script:
     """
@@ -113,3 +117,23 @@ process split_seqs_by_taxa{
     """
 }
 
+// At this point we have the filtered reads split by taxa. Now would be a good time to start analysing the read data and plotting
+// Let's work towards doing plots that are similar to those that we did for the TARA 18S. I.e. we should start by doing a plot
+// that is staked bar of the sequences. We should complete this roughly and quickly so that we can judge how to move forwards.
+process plot_stacked_bars_all_seqs{
+    cache false
+    tag "plot_stacked_bars_all_seqs"
+    conda "envs/nf_18S.yml"
+    publishDir "${params.base_dir}/plotting"
+
+    input:
+    tuple file(c_fasta), file(c_names), file(s_fasta), file(s_names), file(o_fasta), file(o_names) from ch_plotting
+
+    output:
+    tuple file('*.svg'), file('*.png') into ch_plotting_out
+
+    script:
+    """
+    python3 ${params.base_dir}/bin/plotting.py
+    """
+}
