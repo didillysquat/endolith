@@ -6,6 +6,7 @@ dependencies:
   - python=3
   - mothur==1.43.0
   - mmseqs2
+  - matplotlib
   - pip
   - pip:
     - numpy

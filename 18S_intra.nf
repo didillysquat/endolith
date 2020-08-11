@@ -127,13 +127,13 @@ process plot_stacked_bars_all_seqs{
     publishDir "${params.base_dir}/plotting"
 
     input:
-    tuple file(c_fasta), file(c_names), file(s_fasta), file(s_names), file(o_fasta), file(o_names) from ch_plotting
+    tuple file(fasta_names) from ch_plotting.collect()
 
     output:
-    tuple file('*.svg'), file('*.png') into ch_plotting_out
+    file('*.png') into ch_plotting_out
 
     script:
     """
-    python3 ${params.base_dir}/bin/plotting.py
+    python3 ${params.base_dir}/bin/plotting.py ${params.input_data_path}
     """
 }
