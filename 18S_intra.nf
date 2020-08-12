@@ -124,13 +124,13 @@ process plot_stacked_bars_all_seqs{
     cache false
     tag "plot_stacked_bars_all_seqs"
     conda "envs/nf_18S.yml"
-    publishDir "${params.base_dir}/plotting"
+    publishDir "${params.base_dir}/figures"
 
     input:
     tuple file(fasta_names) from ch_plotting.collect()
 
     output:
-    file('*.png') into ch_plotting_out
+    tuple file('*.png'), file('*.svg') into ch_plotting_out
 
     script:
     """

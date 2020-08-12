@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import pandas as pd
 import matplotlib as mpl
@@ -8,6 +9,8 @@ from matplotlib.collections import PatchCollection
 from matplotlib.colors import ListedColormap
 import sys
 import numpy as np
+import scipy.spatial.distance
+import scipy.cluster.hierarchy
 
 
 class Plotting:
@@ -16,82 +19,181 @@ class Plotting:
         self.all_sample_names = sorted(self._get_all_sample_names())
         self.abundance_df = self._make_abundance_df()
         self.fig = plt.figure(figsize=(10,10))
-        gs = self.fig.add_gridspec(2, 2)
+        gs = self.fig.add_gridspec(4, 2)
         self.ax_array_all = [self.fig.add_subplot(gs[0,i]) for i in range(2)]
         self.ax_array_minor = [self.fig.add_subplot(gs[1,i]) for i in range(2)]
+        self.dendro_ax = self.fig.add_subplot(gs[2,:])
+        self.similarity_sorted_stack_ax = self.fig.add_subplot(gs[3,:])
         self.seq_c_dict = self._make_seq_c_dict()
-        
+        # Dynamics
+        self.rect_patch_list = [] 
+        self.rect_c_list = []
+        self.x_coord = 0
+        self.labs = []
+        # The dendro
+        self.dendro = None
     
     def _make_seq_c_dict(self):
         col_list, grey_list = self._get_colour_lists()
         return {seq: col_list[i] if i < len(col_list) else grey_list[i % len(grey_list)] for i, seq in enumerate(list(self.abundance_df))}
 
-    def _plot_one_ax(self, ax, spec_char, minor_only=False):
-        print(f'Processing "{spec_char}" samples')
-        rect_patch_list = []
-        rect_c_list = []
-        x_coord = 0
-        labs = []
-        for sample in [_ for _ in self.all_sample_names if spec_char in _]: # Species specific sample list
-            if sample in self.abundance_df.index:
-                print(f'making Rectangle objects for {sample}')
-                bottom = 0
-                ser = self.abundance_df.loc[sample]
-                seq_abunds = ser[ser > 0]
-                if minor_only:
-                    # We want to remove the most abundant sequence
+    def _make_rectangles(self, minor_only, sample, dendro=False):
+        if sample in self.abundance_df.index:
+            print(f'making Rectangle objects for {sample}')
+            bottom = 0
+            
+            if minor_only:
+                # We want to remove the most abundant sequence
+                if dendro:
+                    # If we are working with the dendro stacked bars, we remove the two most abundant
+                    # seqs from the dataset as this is what the dendro was calculated on. This has
+                    # to be done before sorting as the second most abundant sequence in a given sample
+                    # is not necessarily one of the most abundant sequence in the dataset
+                    ser = self.abundance_df.loc[sample][2:]
+                    seq_abunds = ser[ser > 0]
+                    seq_abunds = seq_abunds.reindex(seq_abunds.sort_values(ascending=False).index)
+                    seq_abunds = seq_abunds.div(sum(seq_abunds))
+                else:
+                    ser = self.abundance_df.loc[sample]
+                    seq_abunds = ser[ser > 0]
                     seq_abunds = seq_abunds.reindex(seq_abunds.sort_values(ascending=False).index)[1:]
                     seq_abunds = seq_abunds.div(sum(seq_abunds))
-                seq_abund_tup_list = [(seq, seq_abunds[seq]) for seq in [_ for _ in list(self.abundance_df) if _ in seq_abunds]]
-                for seq, abund in seq_abund_tup_list:
-                    rect_patch_list.append(Rectangle((x_coord, bottom), 10, abund, color=self.seq_c_dict[seq]))
-                    rect_c_list.append(self.seq_c_dict[seq])
-                    bottom += abund
-                x_coord += 10
             else:
-                # blank column for failed sample
-                x_coord += 10
-            labs.append(sample)
+                ser = self.abundance_df.loc[sample]
+                seq_abunds = ser[ser > 0]
+            seq_abund_tup_list = [(seq, seq_abunds[seq]) for seq in [_ for _ in list(self.abundance_df) if _ in seq_abunds]]
+            for seq, abund in seq_abund_tup_list:
+                self.rect_patch_list.append(Rectangle((self.x_coord, bottom), 10, abund, color=self.seq_c_dict[seq]))
+                self.rect_c_list.append(self.seq_c_dict[seq])
+                bottom += abund
+            self.x_coord += 10
+        else:
+            # blank column for failed sample
+            self.x_coord += 10
+        self.labs.append(sample)
+
+    def _apply_rectangles(self, ax):
         # Here we have the rectangle patches done
-        this_cmap = ListedColormap(rect_c_list)
+        this_cmap = ListedColormap(self.rect_c_list)
         
         # Here we have a list of Rectangle patches
         # Create the PatchCollection object from the patches_list
         print('creating patch collection')
-        patches_collection = PatchCollection(rect_patch_list, cmap=this_cmap)
-        patches_collection.set_array(np.arange(len(rect_patch_list)))
+        self.patches_collection = PatchCollection(self.rect_patch_list, cmap=this_cmap)
+        self.patches_collection.set_array(np.arange(len(self.rect_patch_list)))
         ax.set_ylim(0,1)
-        ax.set_xlim(0, x_coord + 10)
-        ax.set_xticks(range(5,x_coord + 5, 10))
-        ax.set_xticklabels(labs, rotation='vertical')
+        
+    def _format_ax_one_plot(self, ax):
+        ax.set_xlim(0, self.x_coord)
+        ax.set_xticks(range(5, self.x_coord + 5, 10))
+        ax.set_xticklabels(self.labs, rotation='vertical')
+        print('adding patch collection to axis')
+        ax.add_collection(self.patches_collection)
+        print('autoscaling')
+        ax.autoscale_view()
+
+    def _format_ax_all_samples(self, ax):
+        ax.set_xlim(self.dendro_ax.get_xlim())
+        ax.set_xticks([])
+        # ax.set_xticks(range(5,int(self.dendro_ax.get_xlim()[1]),10))
+        # ax.set_xticklabels(self.labs, rotation='vertical')
+        print('adding patch collection to axis')
+        ax.add_collection(self.patches_collection)
+        print('autoscaling')
+        ax.autoscale_view()
+
+    def _apply_rectangles_all_samples(self, ax):
+        # Here we have the rectangle patches done
+        this_cmap = ListedColormap(self.rect_c_list)
+        
+        # Here we have a list of Rectangle patches
+        # Create the PatchCollection object from the patches_list
+        print('creating patch collection')
+        patches_collection = PatchCollection(self.rect_patch_list, cmap=this_cmap)
+        patches_collection.set_array(np.arange(len(self.rect_patch_list)))
+        ax.set_ylim(0,1)
+        ax.set_xlim(0, self.x_coord + 10)
+        ax.set_xticks(range(5, self.x_coord + 5, 10))
+        ax.set_xticklabels(self.labs, rotation='vertical')
         print('adding patch collection to axis')
         ax.add_collection(patches_collection)
         print('autoscaling')
         ax.autoscale_view()
+
+    def _reset_dynamics(self):
+        self.rect_patch_list = []
+        self.rect_c_list = []
+        self.x_coord = 0
+        self.labs = []
+
+    def _plot_one_ax(self, ax, spec_char, minor_only=False):
+        print(f'Processing "{spec_char}" samples')
+        self._reset_dynamics()
+        for sample in [_ for _ in self.all_sample_names if spec_char in _]: # Species specific sample list
+            self._make_rectangles(minor_only=minor_only, sample=sample)
+        self._apply_rectangles(ax=ax)
+        self._format_ax_one_plot(ax=ax)
     
+    def _plot_one_ax_all_samples(self):
+        print(f'Processing all samples by similarity')
+        self._reset_dynamics()
+        for sample in self.dendro['ivl']:
+            self._make_rectangles(minor_only=True, sample=sample, dendro=True)
+        self._apply_rectangles(ax=self.similarity_sorted_stack_ax)
+        self._format_ax_all_samples(ax=self.similarity_sorted_stack_ax)
+
+    def _dendro_plot(self):
+        # Remove 2 most abund seqs
+        dist_abund_df = self.abundance_df.iloc[:,2:]
+        # remove samples that only contained the most abund seq
+        dist_abund_df = dist_abund_df.loc[(dist_abund_df != 0).any(axis=1)]
+        dist_condensed = scipy.spatial.distance.pdist(dist_abund_df, metric='braycurtis')
+        dist_square = scipy.spatial.distance.squareform(dist_condensed)
+        dist_df = pd.DataFrame(dist_square, index=dist_abund_df.index, columns=dist_abund_df.index)
+        # dist_df.to_csv(self.dist_out_path, index=True, header=True, compression='infer')
+        # condensed_dist = scipy.spatial.distance.squareform(dist_df)
+        linkage = scipy.cluster.hierarchy.linkage(y=dist_condensed, optimal_ordering=True)
+        self.dendro = scipy.cluster.hierarchy.dendrogram(linkage, ax=self.dendro_ax, labels=list(dist_df.index), link_color_func=lambda k: 'black')
+        self.dendro_ax.collections[0]._linewidths=np.array([0.5])
+        self.dendro_ax.spines['right'].set_visible(False)
+        self.dendro_ax.spines['top'].set_visible(False)
+        self.dendro_ax.spines['bottom'].set_visible(False)
+        self.dendro_ax.spines['left'].set_visible(False)
+        self.dendro_ax.set_yticks([])
+
     def plot(self):
         """
-        Generate two plots, one for each of the samples. We will organise the samples
-        according to their first character i.e. taxa they are supposed to be G or P
-        Later we can conduct a dissimilarity for the samples, and then we can plot them according 
-        to hierarchical clustering. For the time being though, let's simply plot them in an order
-        sorted by name.
-        Before doing the individual plotting create an abundance df where the sequences are the columns
-        and the samples are the rows.
-        Get the order of the sequences.
-        Then on a persample basis per plot, make rectangles
-        Then plot the rectangles
+        Generate 6 plots.
+        Row one, all seqs, left and right split by species
+        Row two, minor seqs, left and right split by species
+        Row three hierarchical clustering
+        Row four plotted in the order of the hierarchical clustering all together
         """
 
+        # Row one
         for ax, spec_char in zip(self.ax_array_all, ['G', 'P']):
             self._plot_one_ax(ax=ax, spec_char=spec_char)
+            ax.set_title(f'All sequences "{spec_char}" samples', fontsize='small')
         
+        # Row two
         for ax, spec_char in zip(self.ax_array_minor, ['G', 'P']):
             self._plot_one_ax(ax=ax, spec_char=spec_char, minor_only=True)
+            ax.set_title(f'Maj seq removed "{spec_char}" samples', fontsize='small')
+        
+        # Row three
+        # Do braycurtis distances
+        self._dendro_plot()
+        self.dendro_ax.set_title(f'Bray-Curtis dissimilarity (computed on all sequences less the 2 most abund of dataset) hierarchical clustering', fontsize='small')
+
+        # Row four
+        self._plot_one_ax_all_samples()
+        self.similarity_sorted_stack_ax.set_xlabel('2 most abund data set seqs removed all samples same order as hierarchical clustring', fontsize='small')
+
         # Here we have both of the ax objects plotted up
         # now write out.
         plt.tight_layout()
         plt.savefig('stacked_all_seq.png', dpi=1200)
+        plt.savefig('stacked_all_seq.svg', dpi=1200)
                 
     def _make_abundance_df(self):
         """ Create an abundance dictionary that has sample as key and a dict as value
